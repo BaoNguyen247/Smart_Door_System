@@ -1,0 +1,41 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPath": "/home/bao/esp/esp-idf",
+  "idf.pythonInstallPath": "/usr/bin/python3",
+  "idf.openOcdConfigs": [
+    "board/esp32-wrover-kit-3.3v.cfg"
+  ],
+  "idf.port": "/dev/ttyUSB0",
+  "idf.toolsPath": "/home/bao/.espressif",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32"
+  },
+  "clangd.path": "/home/bao/.espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=/home/bao/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc",
+    "--compile-commands-dir=${workspaceFolder}/build"
+  ],
+  "files.associations": {
+    "mqtt_client.h": "c",
+    "stdbool.h": "c",
+    "task.h": "c",
+    "freertos.h": "c",
+    "esp_event.h": "c",
+    "esp_wifi.h": "c",
+    "uart.h": "c",
+    "gpio.h": "c",
+    "esp_transport.h": "c",
+    "esp_rom_gpio.h": "c",
+    "gpio_etm.h": "c",
+    "i2c_master.h": "c",
+    "dedic_gpio.h": "c",
+    "esp_system.h": "c",
+    "event_groups.h": "c",
+    "queue.h": "c",
+    "timers.h": "c",
+    "sys.h": "c",
+    "local.h": "c"
+  },
+  "idf.flashType": "UART"
+}

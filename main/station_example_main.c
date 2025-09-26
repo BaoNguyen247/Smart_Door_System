@@ -9,7 +9,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
@@ -65,7 +64,7 @@
 #define GPIO_ROW_BIT_MASK (1ULL << GPIO_ROW_1) | (1ULL << GPIO_ROW_2) | (1ULL << GPIO_ROW_3) | (1ULL << GPIO_ROW_4)
 #define GPIO_COL_BIT_MASK (1ULL << GPIO_COL_1) | (1ULL << GPIO_COL_2) | (1ULL << GPIO_COL_3) | (1ULL << GPIO_COL_4)
 #define ESP_INTR_FLAG_DEFAULT 0
-
+//END define for matrix keypad
 static const char *TAG = "smartlock_application";
 static const char *TAG1 = "matrix_keypad trigger";
 
@@ -73,12 +72,15 @@ static esp_mqtt_client_handle_t mqtt_client = NULL;
 static QueueHandle_t matrix_interrupt_queue = NULL;
 static TimerHandle_t debounce_timer = NULL;
 static EventGroupHandle_t s_wifi_event_group;
+static QueueHandle_t pass_input_buffer = NULL;
 
 //Some global variables
-
-bool interrupt_flag = false;
+char door_password[6] = {'1', '2', '3', '4', '5', '6'};
+char door_password_buffer[6] = {'\0', '\0', '\0', '\0', '\0', '\0'};
+uint8_t count_input = 0;
 uint8_t number = 0; 
-
+bool lock_state = true; //true is lock, false is unlock
+ 
 // Keypad structure
 typedef struct {
     gpio_num_t row_gpios[4];
@@ -107,7 +109,6 @@ static const char key_map[4][4] = {
 // ISR handler for column interrupts
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-    interrupt_flag = true;
     matrix_keypad_t *keypad = (matrix_keypad_t *)arg;
     BaseType_t high_task_wakeup = pdFALSE;
     
@@ -143,7 +144,7 @@ static void matrix_keypad_debounce_timer_callback(TimerHandle_t xTimer)
     }
     
     // Debug: Log the high column
-    ESP_LOGI(TAG, "High column detected: Col=%d (GPIO %d)", a, keypad->col_gpios[a]);
+    ESP_LOGI(TAG, "Column detected on (GPIO %d)",keypad->col_gpios[a]);
     
     // Step 2: Scan each row to check if the high column goes low
     for (int row = 0; row < 4; row++) {
@@ -160,12 +161,7 @@ static void matrix_keypad_debounce_timer_callback(TimerHandle_t xTimer)
             uint32_t key_code = MAKE_KEY_CODE(row, a);
             char key = key_map[row][a];
             ESP_LOGI(TAG, "Key pressed: Row=%d, Col=%d, Code=%"PRIu32", Key=%c", row, a, key_code, key);
-            // Publish key press via MQTT
-            if (mqtt_client) {
-                char data[32];
-                snprintf(data, sizeof(data), "Key pressed: %c", key);
-                esp_mqtt_client_publish(mqtt_client, "test1", data, 0, 1, 0);
-            }
+            xQueueSendFromISR(pass_input_buffer, &key, NULL);
         }
     }
     
@@ -255,10 +251,43 @@ static esp_err_t matrix_keypad_init(matrix_keypad_t *keypad)
 
 
 
+static void password_check(void* arg)
+{
+    char key;
+    for (;;) {
+        if (xQueueReceive(pass_input_buffer, &key, portMAX_DELAY)) {
+            printf("Check pass : %c\n", key);
+            if(count_input <= 5) {
+                door_password_buffer[count_input] = key;
+                count_input++;
+                if(count_input == 6){
+                    count_input = 0;
+                    bool result_check = true;
+                    //Let check password
+                    printf("Checking password...\n");
+                    for (int i = 0; i < 6; i++){
+                        if (door_password[i] != door_password_buffer[i]){
+                            result_check = false;
+                        }
+                    }
+                    if (result_check) {
+                        printf("Correct password! Door unlocked.\n");
+                        lock_state = false;
+                    }else{
+                        printf("Wrong password! Access denied.\n");
+                        lock_state = true;
+                    }
+                    //Reset buffer
+                    for(int i = 0; i < 6; i++){
+                        door_password_buffer[i] = '\0';
+                    }
+                }
+            }
+        }
+    }
+}
+
 static int s_retry_num = 0;
-
-
-
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
@@ -277,15 +306,20 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         msg_id = esp_mqtt_client_publish(client, "test1", "data_3", 0, 1, 0);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        msg_id = esp_mqtt_client_unsubscribe(client, "test1");
+        ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
+
+
 
         msg_id = esp_mqtt_client_subscribe(client, "test2", 0);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        msg_id = esp_mqtt_client_subscribe(client, "pass/update", 0);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        msg_id = esp_mqtt_client_subscribe(client, "door/control", 0);
         ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
         // msg_id = esp_mqtt_client_subscribe(client, "test1", 1);
         // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        msg_id = esp_mqtt_client_unsubscribe(client, "test1");
-        ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -304,8 +338,37 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
         break;
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        if (strncmp(event->topic, "pass/update", event->topic_len) == 0) {
+            // Update door password
+            if (event->data_len == 6) {
+                memcpy(door_password, event->data, 6);
+                ESP_LOGI(TAG, "Door password updated via MQTT");
+            } else {
+                ESP_LOGW(TAG, "Received invalid password length via MQTT");
+            }
+        } else if (strncmp(event->topic, "door/control", event->topic_len) == 0) {
+            // Control door lock state
+            if (strncmp(event->data, "lock", event->data_len) == 0) {
+                lock_state = true;
+                for (int i = 0; i < 6; i++){
+                    door_password_buffer[i] = '\0';
+                }
+                count_input = 0;
+                ESP_LOGI(TAG, "Door locked via MQTT");
+            } else if (strncmp(event->data, "unlock", event->data_len) == 0) {
+                lock_state = false;
+                for (int i = 0; i < 6; i++){
+                    door_password_buffer[i] = '\0';
+                }
+                count_input = 0;
+                ESP_LOGI(TAG, "Door unlocked via MQTT");
+
+            } else {
+                ESP_LOGW(TAG, "Received invalid door control command via MQTT");
+            }
+        }
+        // printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        // printf("LEN = %d DATA=%.*s\r\n", event->data_len, event->data_len, event->data);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -435,6 +498,8 @@ void app_main(void)
     mqtt_app_start();    
     // Initialize keypad
     ESP_ERROR_CHECK(matrix_keypad_init(&keypad));
+    pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));
+    xTaskCreate(password_check, "password_check", 2048, NULL, 10, NULL);
     while(1) {
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
