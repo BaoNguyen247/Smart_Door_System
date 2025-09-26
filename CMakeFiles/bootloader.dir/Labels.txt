@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/bao/esp32project/Smartlock/CMakeFiles/bootloader
+/home/bao/esp32project/Smartlock/CMakeFiles/bootloader.rule
+/home/bao/esp32project/Smartlock/CMakeFiles/bootloader-complete.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/bao/esp32project/Smartlock/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

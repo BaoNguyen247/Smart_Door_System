@@ -1,0 +1,2 @@
+source /home/bao/esp32project/Smartlock/gdbinit/symbols
+source /home/bao/esp32project/Smartlock/gdbinit/connect
