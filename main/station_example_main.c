@@ -8,16 +8,15 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
-
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/i2c_master.h"
 #include "mqtt_client.h"
-
-
+#include <inttypes.h>
+#include "nvs_flash.h"
+#include "nvs.h"
 #define CONFIG_ESP_WIFI_SSID "Redmi11"
 #define CONFIG_ESP_WIFI_PASSWORD "24702470"
 
@@ -73,6 +72,58 @@ static QueueHandle_t matrix_interrupt_queue = NULL;
 static TimerHandle_t debounce_timer = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static QueueHandle_t pass_input_buffer = NULL;
+
+
+
+// Hàm lưu mật khẩu vào NVS
+static esp_err_t save_password_to_nvs(const char *password, size_t len) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
+        return err;
+    }
+    err = nvs_set_blob(nvs_handle, "doorpassword", password, len);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write password to NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS changes: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Saved password to NVS: %.*s", (int)len, password);
+    return ESP_OK;
+}
+// Hàm đọc mật khẩu từ NVS
+static esp_err_t load_password_from_nvs(char *password, size_t len) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
+        return err;
+    }
+    size_t required_size;
+    err = nvs_get_blob(nvs_handle, "doorpassword", NULL, &required_size);
+    if (err != ESP_OK || required_size != len) {
+        ESP_LOGE(TAG, "Failed to get password size from NVS or size mismatch: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    err = nvs_get_blob(nvs_handle, "doorpassword", password, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read password from NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Loaded password from NVS: %.*s", (int)len, password);
+    return ESP_OK;
+}
 
 //Some global variables
 char door_password[6] = {'1', '2', '3', '4', '5', '6'};
@@ -346,6 +397,12 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
             } else {
                 ESP_LOGW(TAG, "Received invalid password length via MQTT");
             }
+            esp_err_t ret;
+            ret = save_password_to_nvs(door_password, sizeof(door_password));
+                if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to save default password to NVS");
+                    return;
+                }
         } else if (strncmp(event->topic, "door/control", event->topic_len) == 0) {
             // Control door lock state
             if (strncmp(event->data, "lock", event->data_len) == 0) {
@@ -483,13 +540,28 @@ void wifi_init_sta(void)
 
 void app_main(void)
 {
-    //Initialize NVS
-    esp_err_t ret = nvs_flash_init();
+    esp_err_t ret;
+
+    // Initialize NVS
+    ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // Load password from NVS, fallback to default if not found
+    ret = load_password_from_nvs(door_password, sizeof(door_password));
+    if (ret != ESP_OK) {
+        ESP_LOGI(TAG, "Using default password: 123456");
+        ret = save_password_to_nvs(door_password, sizeof(door_password));
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to save default password to NVS");
+            return;
+        }
+    }
+
+
     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
         esp_log_level_set("wifi", CONFIG_LOG_MAXIMUM_LEVEL);
     }

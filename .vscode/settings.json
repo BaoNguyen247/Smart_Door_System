@@ -35,7 +35,12 @@
     "queue.h": "c",
     "timers.h": "c",
     "sys.h": "c",
-    "local.h": "c"
+    "local.h": "c",
+    "nvs_flash.h": "c",
+    "i2c_types.h": "c",
+    "inttypes.h": "c",
+    "_intsup.h": "c",
+    "esp_log.h": "c"
   },
   "idf.flashType": "UART"
 }
