@@ -1,6 +1,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/timers.h"
@@ -51,6 +52,11 @@
 #endif
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
+//GPIO for sensors
+#define GPIO_PIN_POWER 19
+#define GPIO_PIN_SIGNAL 18
+#define GPIO_SENSOR_POWER_BIT_MASK (1ULL << GPIO_PIN_POWER)
+#define GPIO_SENSOR_SIGNAL_BIT_MASK (1ULL << GPIO_PIN_SIGNAL)
 //GPIO for matrix keypad
 #define GPIO_ROW_1 32
 #define GPIO_ROW_2 33
@@ -72,9 +78,12 @@ static QueueHandle_t matrix_interrupt_queue = NULL;
 static TimerHandle_t debounce_timer = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static QueueHandle_t pass_input_buffer = NULL;
-
-
-
+static TaskHandle_t check_door_close_handle = NULL;
+// Global semaphore handle
+SemaphoreHandle_t check_door_close_semaphore = NULL;
+uint32_t futuretime = 0;
+uint32_t currenttime = 0;
+bool one_time_caculate = false;
 // Hàm lưu mật khẩu vào NVS
 static esp_err_t save_password_to_nvs(const char *password, size_t len) {
     nvs_handle_t nvs_handle;
@@ -156,6 +165,7 @@ static const char key_map[4][4] = {
 };
 
 //END define for matrix keypad 
+
 
 // ISR handler for column interrupts
 static void IRAM_ATTR gpio_isr_handler(void *arg)
@@ -324,9 +334,17 @@ static void password_check(void* arg)
                     if (result_check) {
                         printf("Correct password! Door unlocked.\n");
                         lock_state = false;
+                        //Power on the sensor
+                        gpio_set_level(GPIO_PIN_POWER, 1);
+                        vTaskResume(check_door_close_handle); // Tiếp tục task
+                        if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
+                            ESP_LOGE(TAG, "Failed to give semaphore");
+                        }
                     }else{
                         printf("Wrong password! Access denied.\n");
                         lock_state = true;
+                        //Power off the sensor
+                        gpio_set_level(GPIO_PIN_POWER, 0);
                     }
                     //Reset buffer
                     for(int i = 0; i < 6; i++){
@@ -335,6 +353,39 @@ static void password_check(void* arg)
                 }
             }
         }
+    }
+}
+
+
+// Task 1: Waits for semaphore to become active
+void check_door_close(void *arg) {
+    while (1) {
+        // Wait for semaphore (blocks until semaphore is given)
+        if (xSemaphoreTake(check_door_close_semaphore, portMAX_DELAY) == pdTRUE) {
+            if (gpio_get_level(GPIO_PIN_SIGNAL) == 0){
+                if(!one_time_caculate){
+                        futuretime = xTaskGetTickCount() + pdMS_TO_TICKS(5000); //5 seconds from now
+                        one_time_caculate = true;
+                }
+                currenttime = xTaskGetTickCount();
+                if (currenttime >= futuretime){
+                        lock_state = true;
+                        //Power off the sensor
+                        gpio_set_level(GPIO_PIN_POWER, 0);
+                        one_time_caculate = false;
+                        ESP_LOGI(TAG, "Door closed automatically after 5 seconds");
+                        vTaskSuspend(NULL); // Tạm dừng task
+                    }
+                }
+            else{
+                one_time_caculate = false;
+            }
+            ESP_LOGI(TAG, "%d", gpio_get_level(GPIO_PIN_SIGNAL));
+            if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
+                ESP_LOGE(TAG, "Failed to release semaphore");
+            }
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS); // Small delay to prevent tight loop
     }
 }
 
@@ -537,6 +588,34 @@ void wifi_init_sta(void)
 }
 
 
+static void sensor_init(void){
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO19/18
+    io_conf.pin_bit_mask = GPIO_SENSOR_POWER_BIT_MASK;
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //disable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+    //set power pin low
+    gpio_set_level(GPIO_PIN_POWER, 0);
+
+    //set as input mode
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = GPIO_SENSOR_SIGNAL_BIT_MASK;
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+    //hook isr handler for specific gpio pin
+    //gpio_isr_handler_add(GPIO_PIN_SIGNAL, sensors_isr_handler, (void*) GPIO_PIN_SIGNAL);
+
+}
 
 void app_main(void)
 {
@@ -560,7 +639,11 @@ void app_main(void)
             return;
         }
     }
-
+    // Create binary semaphore
+    check_door_close_semaphore = xSemaphoreCreateBinary();
+    if (check_door_close_semaphore == NULL) {
+        ESP_LOGE(TAG, "Failed to create semaphore");
+    }
 
     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
         esp_log_level_set("wifi", CONFIG_LOG_MAXIMUM_LEVEL);
@@ -572,6 +655,8 @@ void app_main(void)
     ESP_ERROR_CHECK(matrix_keypad_init(&keypad));
     pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));
     xTaskCreate(password_check, "password_check", 2048, NULL, 10, NULL);
+    xTaskCreate(check_door_close, "GPIO Check Task", 2048, NULL, 5, &check_door_close_handle);
+    sensor_init();
     while(1) {
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
