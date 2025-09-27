@@ -55,8 +55,10 @@
 //GPIO for sensors
 #define GPIO_PIN_POWER 19
 #define GPIO_PIN_SIGNAL 18
+#define GPIO_LOCKDOOR 17
 #define GPIO_SENSOR_POWER_BIT_MASK (1ULL << GPIO_PIN_POWER)
 #define GPIO_SENSOR_SIGNAL_BIT_MASK (1ULL << GPIO_PIN_SIGNAL)
+#define GPIO_LOCKDOOR_MASK (1ULL << GPIO_LOCKDOOR)
 //GPIO for matrix keypad
 #define GPIO_ROW_1 32
 #define GPIO_ROW_2 33
@@ -332,6 +334,7 @@ static void password_check(void* arg)
                         }
                     }
                     if (result_check) {
+                        gpio_set_level(GPIO_LOCKDOOR, 1);
                         printf("Correct password! Door unlocked.\n");
                         lock_state = false;
                         //Power on the sensor
@@ -373,6 +376,7 @@ void check_door_close(void *arg) {
                         //Power off the sensor
                         gpio_set_level(GPIO_PIN_POWER, 0);
                         one_time_caculate = false;
+                        gpio_set_level(GPIO_LOCKDOOR, 0);
                         ESP_LOGI(TAG, "Door closed automatically after 5 seconds");
                         vTaskSuspend(NULL); // Tạm dừng task
                     }
@@ -462,6 +466,7 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
                     door_password_buffer[i] = '\0';
                 }
                 count_input = 0;
+                gpio_set_level(GPIO_LOCKDOOR, 0);
                 ESP_LOGI(TAG, "Door locked via MQTT");
             } else if (strncmp(event->data, "unlock", event->data_len) == 0) {
                 lock_state = false;
@@ -469,6 +474,12 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
                     door_password_buffer[i] = '\0';
                 }
                 count_input = 0;
+                gpio_set_level(GPIO_PIN_POWER, 1);
+                gpio_set_level(GPIO_LOCKDOOR, 1);
+                vTaskResume(check_door_close_handle); // Tiếp tục task
+                if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
+                    ESP_LOGE(TAG, "Failed to give semaphore");
+                }
                 ESP_LOGI(TAG, "Door unlocked via MQTT");
 
             } else {
@@ -617,10 +628,29 @@ static void sensor_init(void){
 
 }
 
+static void door_control_gpio_init(void){
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO19/18
+    io_conf.pin_bit_mask = GPIO_LOCKDOOR_MASK;
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //disable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+    //set power pin low
+    gpio_set_level(GPIO_LOCKDOOR, 0);
+
+}
+
+
 void app_main(void)
 {
     esp_err_t ret;
-
     // Initialize NVS
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -650,7 +680,8 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
-    mqtt_app_start();    
+    mqtt_app_start();  
+    door_control_gpio_init();  
     // Initialize keypad
     ESP_ERROR_CHECK(matrix_keypad_init(&keypad));
     pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));

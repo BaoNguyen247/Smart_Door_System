@@ -185,3 +185,16 @@
 10	91	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
 11	91	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
 11	91	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+11	72	1758946353349141097	esp-idf/esp_bootloader_format/CMakeFiles/__idf_esp_bootloader_format.dir/esp_bootloader_desc.c.obj	3723179bacf3cea6
+72	100	1758946353381692351	esp-idf/esp_bootloader_format/libesp_bootloader_format.a	2539ef5540f6e35e
+100	277	1758946353556712277	bootloader.elf	c7c38964745f3caf
+278	620	1758946353899059798	.bin_timestamp	68765f1e4e5c457b
+278	620	1758946353899059798	/home/bao/esp32project/Smartlock/build/bootloader/.bin_timestamp	68765f1e4e5c457b
+620	704	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+620	704	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+12	87	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+12	87	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+13	90	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+13	90	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+14	123	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
+14	123	0	/home/bao/esp32project/Smartlock/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c58c8078f5c6388d
