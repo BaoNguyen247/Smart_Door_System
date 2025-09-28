@@ -18,6 +18,11 @@
 #include <inttypes.h>
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <esp_check.h>
+#include "rc522.h"
+#include "driver/rc522_spi.h"
+#include "picc/rc522_mifare.h"
+#include <time.h>
 #define CONFIG_ESP_WIFI_SSID "Redmi11"
 #define CONFIG_ESP_WIFI_PASSWORD "24702470"
 
@@ -52,8 +57,15 @@
 #endif
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
-//GPIO for sensors
+//GPIO for rc522
 
+#define RC522_SPI_BUS_GPIO_MISO    (19)
+#define RC522_SPI_BUS_GPIO_MOSI    (23)
+#define RC522_SPI_BUS_GPIO_SCLK    (18)
+#define RC522_SPI_SCANNER_GPIO_SDA (21)
+#define RC522_SCANNER_GPIO_RST     (-1) // soft-reset
+
+//END GPIO for rc522
 #define GPIO_LOCKDOOR 17
 #define GPIO_LOCKDOOR_MASK (1ULL << GPIO_LOCKDOOR)
 //GPIO for matrix keypad
@@ -71,18 +83,129 @@
 //END define for matrix keypad
 static const char *TAG = "smartlock_application";
 static const char *TAG1 = "matrix_keypad trigger";
-
+static const char *TAGRC522 = "rc522-read-write-example";
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static QueueHandle_t matrix_interrupt_queue = NULL;
 static TimerHandle_t debounce_timer = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static QueueHandle_t pass_input_buffer = NULL;
+// static QueueHandle_t alert_buffer = NULL;
 static TaskHandle_t check_door_close_handle = NULL;
 // Global semaphore handle
 SemaphoreHandle_t check_door_close_semaphore = NULL;
 uint32_t futuretime = 0;
 uint32_t currenttime = 0;
 bool one_time_caculate = false;
+//Some global variables
+char door_password[6] = {'1', '2', '3', '4', '5', '6'};
+char door_password_buffer[6] = {'\0', '\0', '\0', '\0', '\0', '\0'};
+uint8_t count_input = 0;
+uint8_t number = 0; 
+bool lock_state = true; //true is lock, false is unlock
+bool system_lock = false; //true is lock, false is no lock
+uint8_t tryopendoor = 0;
+bool alert_triggered = false;
+//RC522 function
+static rc522_spi_config_t driver_config = {
+    .host_id = SPI3_HOST,
+    .bus_config = &(spi_bus_config_t){
+        .miso_io_num = RC522_SPI_BUS_GPIO_MISO,
+        .mosi_io_num = RC522_SPI_BUS_GPIO_MOSI,
+        .sclk_io_num = RC522_SPI_BUS_GPIO_SCLK,
+    },
+    .dev_config = {
+        .spics_io_num = RC522_SPI_SCANNER_GPIO_SDA,
+    },
+    .rst_io_num = RC522_SCANNER_GPIO_RST,
+};
+
+static rc522_driver_handle_t driver;
+static rc522_handle_t scanner;
+
+static void dump_block(uint8_t buffer[RC522_MIFARE_BLOCK_SIZE])
+{
+    for (uint8_t i = 0; i < RC522_MIFARE_BLOCK_SIZE; i++) {
+        esp_log_write(ESP_LOG_INFO, TAGRC522, "%02" RC522_X " ", buffer[i]);
+    }
+
+    esp_log_write(ESP_LOG_INFO, TAGRC522, "\n");
+}
+
+static esp_err_t read_write(rc522_handle_t scanner, rc522_picc_t *picc)
+{
+    const char *expected_pass = "Smartlock best";
+    const uint8_t block_address = 4;
+    rc522_mifare_key_t key = {
+        .value = { RC522_MIFARE_KEY_VALUE_DEFAULT },
+    };
+
+    ESP_RETURN_ON_ERROR(rc522_mifare_auth(scanner, picc, block_address, &key), TAGRC522, "auth fail");
+
+    uint8_t read_buffer[RC522_MIFARE_BLOCK_SIZE];
+    ESP_LOGI(TAGRC522, "Reading data from the block %d", block_address);
+    ESP_RETURN_ON_ERROR(rc522_mifare_read(scanner, picc, block_address, read_buffer), TAGRC522, "read fail");
+    ESP_LOGI(TAGRC522, "Current data:");
+    dump_block(read_buffer);
+
+    // Validate
+    bool mismatch = strncmp((char *)read_buffer, expected_pass, strlen(expected_pass)) != 0;
+
+    // Feedback
+    if (!mismatch) {
+        ESP_LOGI(TAGRC522, "Password verified.");
+        if (system_lock) {
+            ESP_LOGW(TAG, "System is locked. Cannot unlock door.");
+            return ESP_ERR_INVALID_STATE;
+        }else{
+            gpio_set_level(GPIO_LOCKDOOR, 1);
+            lock_state = false;
+            vTaskResume(check_door_close_handle); // Tiếp tục task
+            if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
+                ESP_LOGE(TAG, "Failed to give semaphore");
+            }        
+            return ESP_OK;
+        }
+    }
+    else {
+        if (system_lock) {
+            ESP_LOGW(TAG, "System is locked. Cannot unlock door.");
+            return ESP_ERR_INVALID_STATE;
+        }else{        
+            ESP_LOGE(TAGRC522, "Password verification failed.");
+            dump_block(read_buffer);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+}
+
+static void on_picc_state_changed(void *arg, esp_event_base_t base, int32_t event_id, void *data)
+{
+    rc522_picc_state_changed_event_t *event = (rc522_picc_state_changed_event_t *)data;
+    rc522_picc_t *picc = event->picc;
+
+    if (picc->state != RC522_PICC_STATE_ACTIVE) {
+        return;
+    }
+
+    rc522_picc_print(picc);
+
+    if (!rc522_mifare_type_is_classic_compatible(picc->type)) {
+        ESP_LOGW(TAGRC522, "Card is not supported by this example");
+        return;
+    }
+
+    if (read_write(scanner, picc) == ESP_OK) {
+        ESP_LOGI(TAGRC522, "Read/Write success");
+    }
+    else {
+        ESP_LOGE(TAGRC522, "Read/Write failed");
+    }
+
+    if (rc522_mifare_deauth(scanner, picc) != ESP_OK) {
+        ESP_LOGW(TAGRC522, "Deauth failed");
+    }
+}
+
 // Hàm lưu mật khẩu vào NVS
 static esp_err_t save_password_to_nvs(const char *password, size_t len) {
     nvs_handle_t nvs_handle;
@@ -133,12 +256,7 @@ static esp_err_t load_password_from_nvs(char *password, size_t len) {
     return ESP_OK;
 }
 
-//Some global variables
-char door_password[6] = {'1', '2', '3', '4', '5', '6'};
-char door_password_buffer[6] = {'\0', '\0', '\0', '\0', '\0', '\0'};
-uint8_t count_input = 0;
-uint8_t number = 0; 
-bool lock_state = true; //true is lock, false is unlock
+
  
 // Keypad structure
 typedef struct {
@@ -310,7 +428,6 @@ static esp_err_t matrix_keypad_init(matrix_keypad_t *keypad)
 }
 
 
-
 static void password_check(void* arg)
 {
     char key;
@@ -321,7 +438,25 @@ static void password_check(void* arg)
                 door_password_buffer[count_input] = key;
                 count_input++;
                 if(count_input == 6){
+                    tryopendoor++;
                     count_input = 0;
+                    if(tryopendoor >= 5){
+                        system_lock = true;
+                        lock_state = true;
+                        gpio_set_level(GPIO_LOCKDOOR, 0);
+                        ESP_LOGI(TAG, "System locked due to 5 failed attempts");
+                        if(tryopendoor % 5 == 0){
+                            ESP_LOGI(TAG, "Alert: Too many failed attempts!");
+                            // Send alert message
+                            esp_mqtt_client_publish(mqtt_client, "door/alert", "alert", 0, 1, 0);
+                            char alert_msg = 'a';
+                            alert_triggered = true;
+
+                        }
+                    for(int i = 0; i < 6; i++){
+                        door_password_buffer[i] = '\0';
+                        }
+                    }else{
                     bool result_check = true;
                     //Let check password
                     printf("Checking password...\n");
@@ -330,19 +465,19 @@ static void password_check(void* arg)
                             result_check = false;
                         }
                     }
-                    if (result_check) {
+                    if (result_check) {                   
                         gpio_set_level(GPIO_LOCKDOOR, 1);
                         printf("Correct password! Door unlocked.\n");
                         lock_state = false;
+                        tryopendoor = 0;
                         //Power on the sensor
                         vTaskResume(check_door_close_handle); // Tiếp tục task
                         if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
                             ESP_LOGE(TAG, "Failed to give semaphore");
-                        }
+                        }                 
                     }else{
                         printf("Wrong password! Access denied.\n");
                         lock_state = true;
-                        //Power off the sensor
                     }
                     //Reset buffer
                     for(int i = 0; i < 6; i++){
@@ -354,7 +489,7 @@ static void password_check(void* arg)
     }
 }
 
-
+}
 // Task 1: Waits for semaphore to become active
 void check_door_close(void *arg) {
     while (1) {
@@ -396,14 +531,12 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
     int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
+
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         msg_id = esp_mqtt_client_publish(client, "test1", "data_3", 0, 1, 0);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         msg_id = esp_mqtt_client_unsubscribe(client, "test1");
         ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
-
-
-
         msg_id = esp_mqtt_client_subscribe(client, "test2", 0);
         ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
         msg_id = esp_mqtt_client_subscribe(client, "pass/update", 0);
@@ -495,12 +628,14 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://192.168.66.198:1883",
+        .broker.address.uri = "mqtt://192.168.74.198:1883",
     };
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler2 */
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler2, NULL);
-    esp_mqtt_client_start(client);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler2, NULL);
+
+    esp_mqtt_client_start(mqtt_client);
+
 }
 
 
@@ -643,6 +778,22 @@ void app_main(void)
     // Initialize keypad
     ESP_ERROR_CHECK(matrix_keypad_init(&keypad));
     pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));
+    // alert_buffer = xQueueCreate(10, sizeof(char));
+
+    //SPI part
+    srand(time(NULL)); // Initialize random generator
+
+    rc522_spi_create(&driver_config, &driver);
+    rc522_driver_install(driver);
+    
+    rc522_config_t scanner_config = {
+        .driver = driver,
+    };
+
+    rc522_create(&scanner_config, &scanner);
+    rc522_register_events(scanner, RC522_EVENT_PICC_STATE_CHANGED, on_picc_state_changed, NULL);
+    rc522_start(scanner);
+    //End SPI part
     xTaskCreate(password_check, "password_check", 2048, NULL, 10, NULL);
     xTaskCreate(check_door_close, "GPIO Check Task", 2048, NULL, 5, &check_door_close_handle);
     while(1) {

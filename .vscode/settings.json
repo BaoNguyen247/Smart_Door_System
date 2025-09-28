@@ -41,7 +41,10 @@
     "inttypes.h": "c",
     "_intsup.h": "c",
     "esp_log.h": "c",
-    "semphr.h": "c"
+    "semphr.h": "c",
+    "stdlib.h": "c",
+    "esp_check.h": "c",
+    "rc522_mifare.h": "c"
   },
   "idf.flashType": "UART"
 }
