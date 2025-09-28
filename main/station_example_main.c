@@ -53,11 +53,8 @@
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 //GPIO for sensors
-#define GPIO_PIN_POWER 19
-#define GPIO_PIN_SIGNAL 18
+
 #define GPIO_LOCKDOOR 17
-#define GPIO_SENSOR_POWER_BIT_MASK (1ULL << GPIO_PIN_POWER)
-#define GPIO_SENSOR_SIGNAL_BIT_MASK (1ULL << GPIO_PIN_SIGNAL)
 #define GPIO_LOCKDOOR_MASK (1ULL << GPIO_LOCKDOOR)
 //GPIO for matrix keypad
 #define GPIO_ROW_1 32
@@ -338,7 +335,6 @@ static void password_check(void* arg)
                         printf("Correct password! Door unlocked.\n");
                         lock_state = false;
                         //Power on the sensor
-                        gpio_set_level(GPIO_PIN_POWER, 1);
                         vTaskResume(check_door_close_handle); // Tiếp tục task
                         if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
                             ESP_LOGE(TAG, "Failed to give semaphore");
@@ -347,7 +343,6 @@ static void password_check(void* arg)
                         printf("Wrong password! Access denied.\n");
                         lock_state = true;
                         //Power off the sensor
-                        gpio_set_level(GPIO_PIN_POWER, 0);
                     }
                     //Reset buffer
                     for(int i = 0; i < 6; i++){
@@ -365,26 +360,18 @@ void check_door_close(void *arg) {
     while (1) {
         // Wait for semaphore (blocks until semaphore is given)
         if (xSemaphoreTake(check_door_close_semaphore, portMAX_DELAY) == pdTRUE) {
-            if (gpio_get_level(GPIO_PIN_SIGNAL) == 0){
-                if(!one_time_caculate){
-                        futuretime = xTaskGetTickCount() + pdMS_TO_TICKS(5000); //5 seconds from now
-                        one_time_caculate = true;
-                }
-                currenttime = xTaskGetTickCount();
-                if (currenttime >= futuretime){
-                        lock_state = true;
-                        //Power off the sensor
-                        gpio_set_level(GPIO_PIN_POWER, 0);
-                        one_time_caculate = false;
-                        gpio_set_level(GPIO_LOCKDOOR, 0);
-                        ESP_LOGI(TAG, "Door closed automatically after 5 seconds");
-                        vTaskSuspend(NULL); // Tạm dừng task
-                    }
-                }
-            else{
-                one_time_caculate = false;
+            if(!one_time_caculate){
+                    futuretime = xTaskGetTickCount() + pdMS_TO_TICKS(5000); //5 seconds from now
+                    one_time_caculate = true;
             }
-            ESP_LOGI(TAG, "%d", gpio_get_level(GPIO_PIN_SIGNAL));
+            currenttime = xTaskGetTickCount();
+            if (currenttime >= futuretime){
+                    lock_state = true;
+                    one_time_caculate = false;
+                    gpio_set_level(GPIO_LOCKDOOR, 0);
+                    ESP_LOGI(TAG, "Door closed automatically after 5 seconds");
+                    vTaskSuspend(NULL); // Tạm dừng task     
+                }
             if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
                 ESP_LOGE(TAG, "Failed to release semaphore");
             }
@@ -474,7 +461,6 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
                     door_password_buffer[i] = '\0';
                 }
                 count_input = 0;
-                gpio_set_level(GPIO_PIN_POWER, 1);
                 gpio_set_level(GPIO_LOCKDOOR, 1);
                 vTaskResume(check_door_close_handle); // Tiếp tục task
                 if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
@@ -509,7 +495,7 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://192.168.241.198:1883",
+        .broker.address.uri = "mqtt://192.168.66.198:1883",
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler2 */
@@ -599,34 +585,6 @@ void wifi_init_sta(void)
 }
 
 
-static void sensor_init(void){
-    gpio_config_t io_conf;
-    //disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO19/18
-    io_conf.pin_bit_mask = GPIO_SENSOR_POWER_BIT_MASK;
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-    io_conf.pull_up_en = 1;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
-    //set power pin low
-    gpio_set_level(GPIO_PIN_POWER, 0);
-
-    //set as input mode
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = GPIO_SENSOR_SIGNAL_BIT_MASK;
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
-    //hook isr handler for specific gpio pin
-    //gpio_isr_handler_add(GPIO_PIN_SIGNAL, sensors_isr_handler, (void*) GPIO_PIN_SIGNAL);
-
-}
 
 static void door_control_gpio_init(void){
     gpio_config_t io_conf;
@@ -687,7 +645,6 @@ void app_main(void)
     pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));
     xTaskCreate(password_check, "password_check", 2048, NULL, 10, NULL);
     xTaskCreate(check_door_close, "GPIO Check Task", 2048, NULL, 5, &check_door_close_handle);
-    sensor_init();
     while(1) {
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
