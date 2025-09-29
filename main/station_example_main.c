@@ -23,8 +23,8 @@
 #include "driver/rc522_spi.h"
 #include "picc/rc522_mifare.h"
 #include <time.h>
-#define CONFIG_ESP_WIFI_SSID "Redmi11"
-#define CONFIG_ESP_WIFI_PASSWORD "24702470"
+#define CONFIG_ESP_WIFI_SSID "Xpro247"
+#define CONFIG_ESP_WIFI_PASSWORD "workfromhome247"
 
 #define EXAMPLE_ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
 
@@ -66,17 +66,31 @@
 #define RC522_SCANNER_GPIO_RST     (-1) // soft-reset
 
 //END GPIO for rc522
-#define GPIO_LOCKDOOR 17
+#define GPIO_LOCKDOOR 17  //For door signal
 #define GPIO_LOCKDOOR_MASK (1ULL << GPIO_LOCKDOOR)
+//END GPIO for door signal
+//Define GPIO for Red LED, Blue led and buzzer
+
+#define GPIO_RED_LED 16
+#define GPIO_BLUE_LED 15
+#define GPIO_BUZZER 22
+
+#define GPIO_RED_LED_MASK (1ULL << GPIO_RED_LED)
+#define GPIO_BLUE_LED_MASK (1ULL << GPIO_BLUE_LED)
+#define GPIO_BUZZER_MASK (1ULL << GPIO_BUZZER)
+
+
+//END define GPIO for Red LED, Blue led and buzzer
+
 //GPIO for matrix keypad
-#define GPIO_ROW_1 32
-#define GPIO_ROW_2 33
-#define GPIO_ROW_3 25
+#define GPIO_ROW_1 14
+#define GPIO_ROW_2 32
+#define GPIO_ROW_3 33
 #define GPIO_ROW_4 26
 #define GPIO_COL_1 27
-#define GPIO_COL_2 14
-#define GPIO_COL_3 12
-#define GPIO_COL_4 13
+#define GPIO_COL_2 12
+#define GPIO_COL_3 25
+#define GPIO_COL_4 34
 #define GPIO_ROW_BIT_MASK (1ULL << GPIO_ROW_1) | (1ULL << GPIO_ROW_2) | (1ULL << GPIO_ROW_3) | (1ULL << GPIO_ROW_4)
 #define GPIO_COL_BIT_MASK (1ULL << GPIO_COL_1) | (1ULL << GPIO_COL_2) | (1ULL << GPIO_COL_3) | (1ULL << GPIO_COL_4)
 #define ESP_INTR_FLAG_DEFAULT 0
@@ -444,6 +458,18 @@ static void password_check(void* arg)
                         system_lock = true;
                         lock_state = true;
                         gpio_set_level(GPIO_LOCKDOOR, 0);
+                        gpio_set_level(GPIO_RED_LED, 1);
+                        gpio_set_level(GPIO_BUZZER, 1);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 0);
+                        gpio_set_level(GPIO_BUZZER, 0);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 1);
+                        gpio_set_level(GPIO_BUZZER, 1);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 0);
+                        gpio_set_level(GPIO_BUZZER, 0);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
                         ESP_LOGI(TAG, "System locked due to 5 failed attempts");
                         if(tryopendoor % 5 == 0){
                             ESP_LOGI(TAG, "Alert: Too many failed attempts!");
@@ -467,6 +493,10 @@ static void password_check(void* arg)
                     }
                     if (result_check) {                   
                         gpio_set_level(GPIO_LOCKDOOR, 1);
+                        gpio_set_level(GPIO_BLUE_LED, 1);
+                        gpio_set_level(GPIO_BUZZER, 1);
+                        vTaskDelay(1000 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_BUZZER, 0);
                         printf("Correct password! Door unlocked.\n");
                         lock_state = false;
                         tryopendoor = 0;
@@ -476,6 +506,18 @@ static void password_check(void* arg)
                             ESP_LOGE(TAG, "Failed to give semaphore");
                         }                 
                     }else{
+                        gpio_set_level(GPIO_RED_LED, 1);
+                        gpio_set_level(GPIO_BUZZER, 1);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 0);
+                        gpio_set_level(GPIO_BUZZER, 0);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 1);
+                        gpio_set_level(GPIO_BUZZER, 1);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
+                        gpio_set_level(GPIO_RED_LED, 0);
+                        gpio_set_level(GPIO_BUZZER, 0);
+                        vTaskDelay(500 / portTICK_PERIOD_MS);
                         printf("Wrong password! Access denied.\n");
                         lock_state = true;
                     }
@@ -504,6 +546,7 @@ void check_door_close(void *arg) {
                     lock_state = true;
                     one_time_caculate = false;
                     gpio_set_level(GPIO_LOCKDOOR, 0);
+                    gpio_set_level(GPIO_BLUE_LED, 0);
                     ESP_LOGI(TAG, "Door closed automatically after 5 seconds");
                     vTaskSuspend(NULL); // Tạm dừng task     
                 }
@@ -587,6 +630,18 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
                 }
                 count_input = 0;
                 gpio_set_level(GPIO_LOCKDOOR, 0);
+                gpio_set_level(GPIO_RED_LED, 1);
+                gpio_set_level(GPIO_BUZZER, 1);
+                vTaskDelay(500 / portTICK_PERIOD_MS);
+                gpio_set_level(GPIO_RED_LED, 0);
+                gpio_set_level(GPIO_BUZZER, 0);
+                vTaskDelay(500 / portTICK_PERIOD_MS);
+                gpio_set_level(GPIO_RED_LED, 1);
+                gpio_set_level(GPIO_BUZZER, 1);
+                vTaskDelay(500 / portTICK_PERIOD_MS);
+                gpio_set_level(GPIO_RED_LED, 0);
+                gpio_set_level(GPIO_BUZZER, 0);
+                vTaskDelay(500 / portTICK_PERIOD_MS);
                 ESP_LOGI(TAG, "Door locked via MQTT");
             } else if (strncmp(event->data, "unlock", event->data_len) == 0) {
                 lock_state = false;
@@ -595,6 +650,10 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
                 }
                 count_input = 0;
                 gpio_set_level(GPIO_LOCKDOOR, 1);
+                gpio_set_level(GPIO_BLUE_LED, 1);
+                gpio_set_level(GPIO_BUZZER, 1);
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                gpio_set_level(GPIO_BUZZER, 0);
                 vTaskResume(check_door_close_handle); // Tiếp tục task
                 if (xSemaphoreGive(check_door_close_semaphore) != pdTRUE) {
                     ESP_LOGE(TAG, "Failed to give semaphore");
@@ -628,7 +687,7 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://192.168.74.198:1883",
+        .broker.address.uri = "mqtt://192.168.100.182:1883",
     };
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler2 */
@@ -741,6 +800,27 @@ static void door_control_gpio_init(void){
 }
 
 
+static void signs_gpio_init(void){
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO19/18
+    io_conf.pin_bit_mask = GPIO_RED_LED_MASK | GPIO_BLUE_LED_MASK | GPIO_BUZZER_MASK;
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //disable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+    //set power pin low
+    gpio_set_level(GPIO_RED_LED, 0);
+    gpio_set_level(GPIO_BLUE_LED, 0);
+    gpio_set_level(GPIO_BUZZER, 0);
+}
+
+
 void app_main(void)
 {
     esp_err_t ret;
@@ -775,6 +855,7 @@ void app_main(void)
     wifi_init_sta();
     mqtt_app_start();  
     door_control_gpio_init();  
+    signs_gpio_init();
     // Initialize keypad
     ESP_ERROR_CHECK(matrix_keypad_init(&keypad));
     pass_input_buffer = xQueueCreate(10, sizeof(uint32_t));
