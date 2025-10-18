@@ -23,8 +23,8 @@
 #include "driver/rc522_spi.h"
 #include "picc/rc522_mifare.h"
 #include <time.h>
-#define CONFIG_ESP_WIFI_SSID "Xpro247"
-#define CONFIG_ESP_WIFI_PASSWORD "workfromhome247"
+#define CONFIG_ESP_WIFI_SSID "Redmi11"
+#define CONFIG_ESP_WIFI_PASSWORD "24702470"
 
 #define EXAMPLE_ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
 
@@ -66,7 +66,7 @@
 #define RC522_SCANNER_GPIO_RST     (-1) // soft-reset
 
 //END GPIO for rc522
-#define GPIO_LOCKDOOR 17  //For door signal
+#define GPIO_LOCKDOOR 5  //For door signal
 #define GPIO_LOCKDOOR_MASK (1ULL << GPIO_LOCKDOOR)
 //END GPIO for door signal
 //Define GPIO for Red LED, Blue led and buzzer
@@ -90,7 +90,7 @@
 #define GPIO_COL_1 27
 #define GPIO_COL_2 12
 #define GPIO_COL_3 25
-#define GPIO_COL_4 34
+#define GPIO_COL_4 12
 #define GPIO_ROW_BIT_MASK (1ULL << GPIO_ROW_1) | (1ULL << GPIO_ROW_2) | (1ULL << GPIO_ROW_3) | (1ULL << GPIO_ROW_4)
 #define GPIO_COL_BIT_MASK (1ULL << GPIO_COL_1) | (1ULL << GPIO_COL_2) | (1ULL << GPIO_COL_3) | (1ULL << GPIO_COL_4)
 #define ESP_INTR_FLAG_DEFAULT 0
@@ -687,7 +687,7 @@ static void mqtt_event_handler2(void *handler_args, esp_event_base_t base, int32
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://192.168.100.182:1883",
+        .broker.address.uri = "mqtt://192.168.53.198:1883",
     };
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler2 */
