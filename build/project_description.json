@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "Smartlock",
-    "project_version":    "f8e9afe-dirty",
+    "project_version":    "935ba85-dirty",
     "project_path":       "/home/bao/esp32project/Smartlock",
     "idf_path":           "/home/bao/esp/esp-idf",
     "build_dir":          "/home/bao/esp32project/Smartlock/build",
